@@ -1,0 +1,23 @@
+# Normaliza a LF en el repo
+* text=auto eol=lf
+
+# Scripts Windows con CRLF
+*.bat text eol=crlf
+*.cmd text eol=crlf
+*.ps1 text eol=crlf
+
+# Shell scripts deben ir con LF (importante para CI)
+*.sh text eol=lf
+gradlew text eol=lf
+
+# Binarios
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.webp binary
+*.jar binary
+*.keystore binary
+*.jks binary
+*.apk binary
+*.aab binary
