@@ -1,23 +1,11 @@
-@file:OptIn(
-    androidx.compose.material3.ExperimentalMaterial3Api::class,
-    androidx.compose.foundation.ExperimentalFoundationApi::class
-)
+@file:OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
 
 package com.example.psinotes.ui.theme
 
-import androidx.compose.ui.window.Dialog
-import androidx.compose.ui.input.pointer.pointerInput
-import androidx.compose.ui.window.Dialog
-import androidx.compose.ui.window.DialogProperties
-
-import android.Manifest
-import android.content.ContentValues
 import android.net.Uri
 import android.os.Environment
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.compose.foundation.Image
-import androidx.compose.foundation.gestures.detectTransformGestures
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
@@ -25,24 +13,30 @@ import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material.icons.filled.CameraAlt
+import androidx.compose.material.icons.filled.AddAPhoto
+import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
-import androidx.compose.ui.layout.ContentScale
-import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
 import androidx.core.content.FileProvider
 import coil.compose.AsyncImage
+import androidx.compose.foundation.gestures.detectTransformGestures
+import androidx.compose.ui.layout.ContentScale
 import java.io.File
 import java.text.SimpleDateFormat
 import java.util.*
-import kotlin.math.max
-import kotlin.math.min
+
+/* ============================================================
+   Galería de Imágenes — por paciente, con borrado y visor zoom
+   ============================================================ */
 
 @Composable
 fun ImagesScreen(
@@ -52,49 +46,39 @@ fun ImagesScreen(
     onToast: (String) -> Unit
 ) {
     val pink = Color(0xFFFF2D6C)
-    val ctx = LocalContext.current
+    val ctx = androidx.compose.ui.platform.LocalContext.current
 
-    // Carpeta privada por paciente: .../files/Pictures/patient_<id>/
-    val picsDir = remember {
-        File(ctx.getExternalFilesDir(Environment.DIRECTORY_PICTURES), "patient_$patientId")
-            .apply { mkdirs() }
+    // Carpeta por paciente
+    val picsDir = remember(patientId) {
+        File(ctx.getExternalFilesDir(Environment.DIRECTORY_PICTURES), "patient_$patientId").apply { mkdirs() }
     }
 
-    // Permiso de cámara (solo CAMERA)
-    var hasCamPerm by remember { mutableStateOf(false) }
-    val camPerm = rememberLauncherForActivityResult(
-        ActivityResultContracts.RequestPermission()
-    ) { granted -> hasCamPerm = granted }
-    LaunchedEffect(Unit) { camPerm.launch(Manifest.permission.CAMERA) }
+    // Lista de imágenes (archivo + uri)
+    var images by remember { mutableStateOf(loadImages(ctx, picsDir)) }
+    fun refresh() { images = loadImages(ctx, picsDir) }
 
-    // Lista de imágenes (como Uri de file provider)
-    var images by remember { mutableStateOf(loadImagesAsUris(ctx, picsDir)) }
-    fun refresh() { images = loadImagesAsUris(ctx, picsDir) }
+    // Estado del visor
+    var preview by remember { mutableStateOf<Img?>(null) }
 
-    // Estado del visor full-screen
-    var previewUri by remember { mutableStateOf<Uri?>(null) }
-
-    // Captura con cámara → TAKE_PICTURE exige Uri de destino
-    var pendingPhotoUri by remember { mutableStateOf<Uri?>(null) }
-    val takePic = rememberLauncherForActivityResult(ActivityResultContracts.TakePicture()) { ok ->
-        if (ok) {
-            onToast("Imagen guardada")
+    // Tomar foto
+    var pendingFile by remember { mutableStateOf<File?>(null) }
+    val takePicture = rememberLauncherForActivityResult(ActivityResultContracts.TakePicture()) { ok ->
+        val f = pendingFile
+        if (ok && f != null && f.exists()) {
             refresh()
+            onToast("Foto guardada")
         } else {
-            // si no tomó, elimina archivo vacío
-            pendingPhotoUri?.let { uri ->
-                runCatching { ctx.contentResolver.delete(uri, null, null) }
-            }
+            // limpiar si se canceló
+            if (f != null && f.exists()) runCatching { f.delete() }
         }
-        pendingPhotoUri = null
+        pendingFile = null
     }
 
     fun startCamera() {
-        if (!hasCamPerm) { onToast("Se requiere permiso de cámara"); camPerm.launch(Manifest.permission.CAMERA); return }
-        val file = createImageFile(picsDir)
-        val uri = FileProvider.getUriForFile(ctx, "${ctx.packageName}.fileprovider", file)
-        pendingPhotoUri = uri
-        takePic.launch(uri)
+        val f = createImageFile(picsDir)
+        pendingFile = f
+        val uri = FileProvider.getUriForFile(ctx, "${ctx.packageName}.fileprovider", f)
+        takePicture.launch(uri)
     }
 
     Scaffold(
@@ -102,24 +86,30 @@ fun ImagesScreen(
             TopAppBar(
                 navigationIcon = {
                     IconButton(onClick = onBack) {
-                        Icon(Icons.AutoMirrored.Filled.ArrowBack, "Volver", tint = Color.White)
+                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Volver", tint = Color.White)
                     }
                 },
-                title = { Text("Imágenes" + if (!patientName.isNullOrBlank()) " · $patientName" else "", color = Color.White) },
+                title = {
+                    Text(
+                        "Imágenes" + if (!patientName.isNullOrBlank()) " · $patientName" else "",
+                        color = Color.White,
+                        fontWeight = FontWeight.Bold
+                    )
+                },
                 colors = TopAppBarDefaults.topAppBarColors(containerColor = pink)
             )
         },
         floatingActionButton = {
             FloatingActionButton(
-                onClick = ::startCamera,
+                onClick = { startCamera() },
                 containerColor = pink,
                 contentColor = Color.White
-            ) { Icon(Icons.Filled.CameraAlt, contentDescription = "Tomar foto") }
+            ) { Icon(Icons.Filled.AddAPhoto, contentDescription = "Tomar foto") }
         }
     ) { inner ->
         if (images.isEmpty()) {
             Box(Modifier.padding(inner).fillMaxSize(), contentAlignment = Alignment.Center) {
-                Text("Sin imágenes. Usa el botón de cámara para agregar.")
+                Text("Aún no hay fotos. Usa el botón para tomar una.")
             }
         } else {
             LazyVerticalGrid(
@@ -127,20 +117,20 @@ fun ImagesScreen(
                 modifier = Modifier
                     .padding(inner)
                     .fillMaxSize()
-                    .padding(8.dp),
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                verticalArrangement = Arrangement.spacedBy(8.dp)
+                    .padding(12.dp),
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+                verticalArrangement = Arrangement.spacedBy(12.dp)
             ) {
-                items(images, key = { it.toString() }) { uri ->
-                    Card(
-                        onClick = { previewUri = uri },
+                items(images, key = { it.file.absolutePath }) { img ->
+                    ElevatedCard(
+                        onClick = { preview = img },
+                        shape = RoundedCornerShape(12.dp),
                         modifier = Modifier
                             .fillMaxWidth()
-                            .aspectRatio(1f),
-                        shape = RoundedCornerShape(12.dp)
+                            .aspectRatio(1f)
                     ) {
                         AsyncImage(
-                            model = uri,
+                            model = img.uri,
                             contentDescription = null,
                             modifier = Modifier.fillMaxSize(),
                             contentScale = ContentScale.Crop
@@ -151,23 +141,36 @@ fun ImagesScreen(
         }
     }
 
-    // Visor fullscreen con zoom
-    if (previewUri != null) {
+    // Visor fullscreen con Reset / Eliminar / Cerrar
+    if (preview != null) {
         FullscreenPreview(
-            imageUri = previewUri!!,
-            onDismiss = { previewUri = null },
+            image = preview!!,
+            onDismiss = { preview = null },
+            onDelete = { img ->
+                // intenta borrar por ContentResolver, si no por File
+                val byResolver = runCatching { ctx.contentResolver.delete(img.uri, null, null) }.getOrNull() ?: 0
+                if (byResolver == 0) runCatching { img.file.delete() }
+                refresh()
+                onToast("Imagen eliminada")
+                preview = null
+            },
             accent = pink
         )
     }
 }
 
-/* ---------------- Helpers ---------------- */
+/* --------------------- Helpers / modelos --------------------- */
 
-private fun loadImagesAsUris(ctx: android.content.Context, dir: File): List<Uri> {
+private data class Img(val file: File, val uri: Uri)
+
+private fun loadImages(ctx: android.content.Context, dir: File): List<Img> {
     val files = dir.listFiles { f -> f.isFile && f.extension.lowercase() in listOf("jpg","jpeg","png") }
         ?.sortedByDescending { it.lastModified() }
         ?: emptyList()
-    return files.map { f -> FileProvider.getUriForFile(ctx, "${ctx.packageName}.fileprovider", f) }
+    return files.map { f ->
+        val uri = FileProvider.getUriForFile(ctx, "${ctx.packageName}.fileprovider", f)
+        Img(file = f, uri = uri)
+    }
 }
 
 private fun createImageFile(dir: File): File {
@@ -175,32 +178,28 @@ private fun createImageFile(dir: File): File {
     return File(dir, "img_$ts.jpg")
 }
 
+/* --------------------- Visor fullscreen --------------------- */
+
 @Composable
 private fun FullscreenPreview(
-    imageUri: Uri,
+    image: Img,
     onDismiss: () -> Unit,
+    onDelete: (Img) -> Unit,
     accent: Color
 ) {
     var scale by remember { mutableStateOf(1f) }
     var offsetX by remember { mutableStateOf(0f) }
     var offsetY by remember { mutableStateOf(0f) }
+    var askDelete by remember { mutableStateOf(false) }
 
     Dialog(
         onDismissRequest = onDismiss,
-        properties = DialogProperties(
-            usePlatformDefaultWidth = false,   // <-- sin márgenes: ocupa toda la pantalla
-            decorFitsSystemWindows = false
-        )
+        properties = DialogProperties(usePlatformDefaultWidth = false, decorFitsSystemWindows = false)
     ) {
-        // Raíz negro FULL
-        Surface(
-            modifier = Modifier.fillMaxSize(),
-            color = Color.Black,
-            tonalElevation = 0.dp
-        ) {
+        Surface(modifier = Modifier.fillMaxSize(), color = Color.Black, tonalElevation = 0.dp) {
             Box(Modifier.fillMaxSize()) {
                 AsyncImage(
-                    model = imageUri,
+                    model = image.uri,
                     contentDescription = null,
                     modifier = Modifier
                         .fillMaxSize()
@@ -224,21 +223,48 @@ private fun FullscreenPreview(
                 Row(
                     Modifier
                         .align(Alignment.TopEnd)
-                        .padding(12.dp)
+                        .padding(12.dp),
+                    verticalAlignment = Alignment.CenterVertically
                 ) {
                     TextButton(
                         onClick = { scale = 1f; offsetX = 0f; offsetY = 0f },
                         colors = ButtonDefaults.textButtonColors(contentColor = Color.White.copy(alpha = 0.85f))
                     ) { Text("Reset") }
-                    Spacer(Modifier.width(4.dp))
+
+                    Spacer(Modifier.width(6.dp))
+
+                    FilledTonalButton(
+                        onClick = { askDelete = true },
+                        colors = ButtonDefaults.filledTonalButtonColors(containerColor = Color(0xFFD32F2F))
+                    ) {
+                        Icon(Icons.Filled.Delete, contentDescription = null, tint = Color.White)
+                        Spacer(Modifier.width(6.dp))
+                        Text("Eliminar", color = Color.White)
+                    }
+
+                    Spacer(Modifier.width(6.dp))
+
                     FilledTonalButton(
                         onClick = onDismiss,
                         colors = ButtonDefaults.filledTonalButtonColors(containerColor = accent)
-                    ) {
-                        Text("Cerrar", color = Color.White)
-                    }
+                    ) { Text("Cerrar", color = Color.White) }
                 }
             }
         }
+    }
+
+    if (askDelete) {
+        AlertDialog(
+            onDismissRequest = { askDelete = false },
+            title = { Text("Eliminar imagen") },
+            text = { Text("¿Seguro que deseas eliminar esta imagen? Esta acción no se puede deshacer.") },
+            confirmButton = {
+                TextButton(
+                    onClick = { askDelete = false; onDelete(image) },
+                    colors = ButtonDefaults.textButtonColors(contentColor = Color(0xFFD32F2F))
+                ) { Text("Eliminar") }
+            },
+            dismissButton = { TextButton(onClick = { askDelete = false }) { Text("Cancelar") } }
+        )
     }
 }
