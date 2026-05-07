@@ -88,3 +88,15 @@ dependencies {
     androidTestImplementation("androidx.test.ext:junit:1.2.1")
     androidTestImplementation("androidx.test.espresso:espresso-core:3.6.1")
 }
+
+tasks.register<Copy>("renameDebugApk") {
+    // carpeta: app/build/outputs/apk/debug
+    val outDir = layout.buildDirectory.dir("outputs/apk/debug")
+
+    from(outDir.map { it.file("app-debug.apk") })
+    into(outDir)
+    rename("app-debug.apk", "PsiNotes.apk")
+
+    // solo corre si existe el archivo fuente
+    onlyIf { outDir.get().file("app-debug.apk").asFile.exists() }
+}
